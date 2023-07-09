@@ -9,9 +9,9 @@ class Scraper:
         self.product_urls: list[str] = []
         self.products: list[Product] = []
 
-    async def _scraping_page(self, page: int) -> None:
+    async def _scraping_page(self, session: aiohttp.ClientSession, page: int) -> None:
         url = f"https://www.parsemachine.com/sandbox/catalog/?page={page}"
-        resp = await self.session.get(url=url, headers=HEADERS)
+        resp = await session.get(url=url, headers=HEADERS)
         soup = BeautifulSoup(await resp.text(), "lxml")
         cards = soup.find_all("div", class_="card")
         urls = []
@@ -21,8 +21,8 @@ class Scraper:
 
         self.product_urls.extend(urls)
 
-    async def _scraping_product(self, url: str) -> None:
-        resp = await self.session.get(url=url, headers=HEADERS)
+    async def _scraping_product(self, session: aiohttp.ClientSession, url: str) -> None:
+        resp = await session.get(url=url, headers=HEADERS)
         soup = BeautifulSoup(await resp.text(), "lxml")
 
         name = soup.find("h1", id="product_name").text.strip()
@@ -33,26 +33,28 @@ class Scraper:
         width, height, depth = (int(c.find_all("td")[1].text.split()[0]) for c in characteristics)
 
         self.products.append(Product(name=name, description=description, link=url, price=price, article=article, width=width,
-                                height=height, depth=depth))
+                                     height=height, depth=depth))
 
     async def _get_product_data(self) -> None:
-        # get amount of pages
-        url = "https://www.parsemachine.com/sandbox/catalog/"
-        resp = await self.session.get(url=url, headers=HEADERS)
-        soup = BeautifulSoup(await resp.text(), "lxml")
-        pagination_block = soup.find("div", id="pagination")
-        amount_of_pages = int(pagination_block.find_all("a")[-2].text)
+        async with aiohttp.ClientSession() as session:
 
-        # get product page links
-        async with asyncio.TaskGroup() as tg:
-            for page in range(amount_of_pages):
-                tg.create_task(self._scraping_page(page))
+            # get amount of pages
+            url = "https://www.parsemachine.com/sandbox/catalog/"
+            resp = await session.get(url=url, headers=HEADERS)
+            soup = BeautifulSoup(await resp.text(), "lxml")
+            pagination_block = soup.find("div", id="pagination")
+            amount_of_pages = int(pagination_block.find_all("a")[-2].text)
 
-        # get products data
-        async with asyncio.TaskGroup() as tg:
-            for p_url in self.product_urls:
-                url = f"https://www.parsemachine.com{p_url}"
-                tg.create_task(self._scraping_product(url))
+            # get product page links
+            async with asyncio.TaskGroup() as tg:
+                for page in range(amount_of_pages):
+                    tg.create_task(self._scraping_page(session, page))
+
+            # get products data
+            async with asyncio.TaskGroup() as tg:
+                for p_url in self.product_urls:
+                    url = f"https://www.parsemachine.com{p_url}"
+                    tg.create_task(self._scraping_product(session, url))
 
     def run(self):
         asyncio.run(self._get_product_data())
@@ -74,4 +76,3 @@ if __name__ == '__main__':
     main()
     end = time()
     print(f"Total work time for '{__file__}': {end - start:.3f}s")
-
